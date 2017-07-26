@@ -52,14 +52,18 @@ static int8_t latestRssi;
 static uint16_t latestAckSeqNo;
 
 static uint16_t rxPacketCount = 0;
-static uint16_t counter = 0;
+static uint16_t counter = 000;
 /* Pin driver handle */
 static PIN_Handle buttonPinHandle;
 static PIN_State buttonPinState;
+static PIN_Handle buttonPinHandle1;
+static PIN_State buttonPinState1;
 static PIN_Handle ledPinHandle;
 static PIN_State ledPinState;
 
 static bool txFlag;
+
+//array of seq num received?
 
 /* Enable the 3.3V power domain used by the LCD */
 PIN_Config pinTable[] = {
@@ -72,7 +76,12 @@ PIN_Config pinTable[] = {
  *   - Buttons interrupts are configured to trigger on falling edge.
  */
 PIN_Config buttonPinTable[] = {
-    Board_BUTTON0  | PIN_INPUT_EN | PIN_PULLUP | PIN_IRQ_NEGEDGE,
+    Board_BUTTON0 | PIN_INPUT_EN | PIN_PULLUP | PIN_IRQ_NEGEDGE,
+    PIN_TERMINATE
+};
+
+PIN_Config buttonPinTable1[] = {
+    Board_BUTTON1 | PIN_INPUT_EN | PIN_PULLUP | PIN_IRQ_NEGEDGE,
     PIN_TERMINATE
 };
 
@@ -84,6 +93,7 @@ PIN_Config ledPinTable[] = {
 /***** Prototypes *****/
 static void appTaskFunction(UArg arg0, UArg arg1);
 void buttonCallback(PIN_Handle handle, PIN_Id pinId);
+void buttonCallback1(PIN_Handle handle, PIN_Id pinId);
 static void updateLcd(void);
 
 
@@ -98,6 +108,7 @@ void appTask_init(void)
 
     txFlag = 0;
     latestAckSeqNo = 0;
+    tempNewPacket.destAddress = 0x01;
     /* Create event used internally for state changes */
     Event_Params eventParam;
     Event_Params_init(&eventParam);
@@ -140,18 +151,30 @@ static void appTaskFunction(UArg arg0, UArg arg1)
         System_abort("Error registering button callback function");
     }
 
+    buttonPinHandle1 = PIN_open(&buttonPinState1, buttonPinTable1);
+    if (!buttonPinHandle1)
+    {
+        System_abort("Error initializing button pins\n");
+    }
+
+    /* Setup callback for button pins */
+    if (PIN_registerIntCb(buttonPinHandle1, &buttonCallback) != 0)
+    {
+        System_abort("Error registering button callback function");
+    }
+
 
     while(1) {
-        uint32_t events = Event_pend(appEventHandle, 0, APP_EVENT_ALL, BIOS_WAIT_FOREVER);
+        uint32_t events = Event_pend(appEventHandle, 0, APP_EVENT_ALL, 1000);
 
         if(events & APP_EVENT_SEND_DATA) {
           counter += 1;
-          tempNewPacket.destAddress = (NODE_ADDR) ? 0x00 : 0x01;
+          tempNewPacket.destAddress = 2; // addr 2: ^= 0b01 addr 1: ^= 0b10 addr 0: initialize to 1 ^=0b11
           tempNewPacket.packet.header.sourceAddress = NODE_ADDR;
           tempNewPacket.packet.header.packetType = PacketType_Data;
           tempNewPacket.packet.dataPacket.seqNo = counter;
 
-          if (counter >= 100) {
+          if (counter >= 200) {
               txFlag = 0;
           }
           floodTask_sendData(&tempNewPacket);
@@ -160,12 +183,14 @@ static void appTaskFunction(UArg arg0, UArg arg1)
             floodTask_sendData(&tempNewPacket);
         }
 
-        if(events & APP_EVENT_NEW_DATA) {
-          //update display
-          updateLcd();
-
-          //TODO update relevant packet statistics
-        }
+//        if (counter >= 100) {
+//            txFlag = 0;
+//            counter = 0;
+//            rxPacketCount = 0;
+//            latestAckSeqNo = 0;
+//            Event_post(appEventHandle, APP_EVENT_SEND_DATA);
+//        }
+        updateLcd();
     }
 }
 
@@ -177,8 +202,11 @@ void appTask_packetReceived(struct ComboPacket* packet, int8_t rssi)
 
         if(latestPacket.destAddress == NODE_ADDR) {
             rxPacketCount++;
+            if (!txFlag) {
+                txFlag = 1;
+                Event_post(appEventHandle, APP_EVENT_SEND_DATA);
+            }
         }
-        Event_post(appEventHandle, APP_EVENT_NEW_DATA);
 }
 
 void appTask_ackReceived(uint16_t seqNo)
@@ -187,8 +215,6 @@ void appTask_ackReceived(uint16_t seqNo)
     if (txFlag) {
         Event_post(appEventHandle, APP_EVENT_SEND_DATA);
     }
-
-        Event_post(appEventHandle, APP_EVENT_NEW_DATA);
 }
 
 void appTask_sendFail() {
@@ -206,14 +232,20 @@ void buttonCallback(PIN_Handle handle, PIN_Id pinId)
 
     if (PIN_getInputValue(Board_BUTTON0) == 0)
     {
-        txFlag = ~txFlag;
         Event_post(appEventHandle, APP_EVENT_SEND_DATA);
+    }
+    if (PIN_getInputValue(Board_BUTTON1) == 0)
+    {
+        txFlag = 0;
+        counter = 0;
+        rxPacketCount = 0;
+        latestAckSeqNo = 0;
     }
 }
 
 static void updateLcd(void) {
 
-    Display_clear(hDisplayLcd);
+//    Display_clear(hDisplayLcd);
     Display_print0(hDisplayLcd, 0, 0, "SAddr DAddr");
 
     Display_print2(hDisplayLcd, 1, 0, "0x%02x  0x%02x",

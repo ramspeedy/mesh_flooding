@@ -45,7 +45,7 @@ static Event_Handle floodEventHandle;
 
 /***** Prototypes *****/
 static void floodTaskFunction(UArg arg0, UArg arg1);
-static bool shouldForward(uint8_t hopCount, uint8_t floodControl);
+static bool shouldForward(struct ComboPacket* packet);
 
 /***** Function definitions *****/
 void floodTask_init(void)
@@ -75,15 +75,17 @@ static void floodTaskFunction(UArg arg0, UArg arg1)
 
         if (events & FLOOD_EVENT_SEND_DATA) {
           //fill out empty fields in packet
-          packetSend.packet.header.floodControl = 0;
-          packetSend.packet.header.hopCount = 2;
+          packetSend.packet.header.floodControl = (0x01 << NODE_ADDR);
+          packetSend.packet.header.hopCount = 1;
           //call mac task
-          macTask_sendData(&packetSend);
+          if (macTask_sendData(&packetSend) != NodeRadioStatus_Success) {
+              appTask_sendFail();
+          }
         }
 
         if (events & FLOOD_EVENT_FORWARD_PACKET) {
           //check flooding flags
-          if (shouldForward(packetFlood.packet.header.hopCount, packetFlood.packet.header.floodControl)) {
+          if (shouldForward(&packetFlood)) {
             //Modify flood bits in packet
             packetFlood.packet.header.floodControl = (packetFlood.packet.header.floodControl | (1 << NODE_ADDR));
             packetFlood.packet.header.hopCount--;
@@ -104,17 +106,16 @@ void floodTask_sendData(struct ComboPacket* packet) {
   Event_post(floodEventHandle, FLOOD_EVENT_SEND_DATA);
 }
 
-static bool shouldForward(uint8_t hopCount, uint8_t floodControl) {
+static bool shouldForward(struct ComboPacket* packet) {
   //TODO logic based on nodeAddress variable/define
-  return ((hopCount > 0) && !((floodControl >> NODE_ADDR) & 0x01));
+  return ((packet->packet.header.hopCount > 0) && !((packet->packet.header.floodControl >> NODE_ADDR) & 0x01));
 }
 
 void floodTask_floodPacket(struct ComboPacket* packet, int8_t rssi) { //TODO rethink these params
-  //Ask AppTask to update lcd
-  appTask_packetReceived(packet, rssi);
+
+//  appTask_packetReceived(packet, rssi);
   //TODO Make into queue
 
   memcpy(&packetFlood, packet, sizeof(struct ComboPacket));
-
   Event_post(floodEventHandle, FLOOD_EVENT_FORWARD_PACKET);
 }

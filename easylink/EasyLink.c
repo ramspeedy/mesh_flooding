@@ -929,26 +929,18 @@ EasyLink_Status EasyLink_abort(void)
     //check an Async command is running, if not return success
     if (!EasyLink_CmdHandle_isValid(asyncCmdHndl))
     {
-        return EasyLink_Status_Aborted;
+        return EasyLink_Status_Success; //Modified
     }
 
     //force abort (gracefull param set to 0)
     if (RF_cancelCmd(rfHandle, asyncCmdHndl, 0) == RF_StatSuccess)
     {
-       /* Wait for Command to complete */
-       RF_EventMask result = RF_pendCmd(rfHandle, asyncCmdHndl, (RF_EventLastCmdDone | RF_EventCmdError |
-               RF_EventCmdAborted | RF_EventCmdCancelled | RF_EventCmdStopped));
-
-       if (result & RF_EventLastCmdDone)
-       {
-           status = EasyLink_Status_Success;
-       }
+       status = EasyLink_Status_Success;
     }
     else
     {
        status = EasyLink_Status_Cmd_Error;
     }
-
     return status;
 }
 
