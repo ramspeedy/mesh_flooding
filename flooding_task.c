@@ -26,7 +26,7 @@
 
 
 /***** Defines *****/
-#define FLOOD_TASK_STACK_SIZE 1024
+#define FLOOD_TASK_STACK_SIZE 256
 #define FLOOD_TASK_PRIORITY   3
 
 #define FLOOD_EVENT_ALL                  0xFFFFFFFF

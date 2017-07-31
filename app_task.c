@@ -106,7 +106,7 @@ void appTask_init(void)
         System_abort("Error initializing board 3.3V domain pins\n");
     }
 
-    txFlag = 0;
+    txFlag = 1;
     latestAckSeqNo = 0;
     tempNewPacket.destAddress = 0x01;
     /* Create event used internally for state changes */
@@ -169,7 +169,7 @@ static void appTaskFunction(UArg arg0, UArg arg1)
 
         if(events & APP_EVENT_SEND_DATA) {
           counter += 1;
-          tempNewPacket.destAddress = 2; // addr 2: ^= 0b01 addr 1: ^= 0b10 addr 0: initialize to 1 ^=0b11
+          tempNewPacket.destAddress ^= 0b11; // addr 2: ^= 0b01 addr 1: ^= 0b10 addr 0: initialize to 1 ^=0b11
           tempNewPacket.packet.header.sourceAddress = NODE_ADDR;
           tempNewPacket.packet.header.packetType = PacketType_Data;
           tempNewPacket.packet.dataPacket.seqNo = counter;
@@ -236,7 +236,7 @@ void buttonCallback(PIN_Handle handle, PIN_Id pinId)
     }
     if (PIN_getInputValue(Board_BUTTON1) == 0)
     {
-        txFlag = 0;
+        txFlag = 1;
         counter = 0;
         rxPacketCount = 0;
         latestAckSeqNo = 0;

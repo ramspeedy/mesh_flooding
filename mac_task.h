@@ -10,10 +10,8 @@
 
 enum NodeRadioOperationStatus {
     NodeRadioStatus_Success,
-    NodeRadioStatus_Failed,
-    NodeRadioStatus_FailedNotConnected,
+    NodeRadioStatus_Failed
 };
-
 
 /* Initializes the NodeRadioTask and creates all TI-RTOS objects */
 void macTask_init(void);

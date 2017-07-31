@@ -42,28 +42,33 @@
 
 #define RADIO_EVENT_ALL                          0xFFFFFFFF
 #define RADIO_EVENT_SEND_DATA                    (uint32_t)(1 << 0)
-#define RADIO_EVENT_SEND_FAIL                    (uint32_t)(1 << 1)
-#define RADIO_EVENT_FORWARD_PACKET               (uint32_t)(1 << 2)
-#define RADIO_EVENT_OTHER_PACKET_RECEIVED        (uint32_t)(1 << 3)
-#define RADIO_EVENT_DATA_ACK_RECEIVED            (uint32_t)(1 << 4)
-#define RADIO_EVENT_VALID_PACKET_RECEIVED        (uint32_t)(1 << 5)
-#define RADIO_EVENT_ACK_TIMEOUT                  (uint32_t)(1 << 6)
+#define RADIO_EVENT_FORWARD_PACKET               (uint32_t)(1 << 1)
+#define RADIO_EVENT_OTHER_PACKET_RECEIVED        (uint32_t)(1 << 2)
+#define RADIO_EVENT_DATA_ACK_RECEIVED            (uint32_t)(1 << 3)
+#define RADIO_EVENT_VALID_PACKET_RECEIVED        (uint32_t)(1 << 4)
+#define RADIO_EVENT_ACK_TIMEOUT                  (uint32_t)(1 << 5)
 
 #define RADIO_MAX_RETRIES 1
 #define RADIO_ACK_TIMEOUT_TIME_MS 10
+#define NO_TIMEOUT 500
 
 #define RSSI_THRESHOLD -55
 #define RSSI_TIMEOUT_MS 15
 
-#define NO_TIMEOUT 0
 
 /***** Type declarations *****/
+enum opType {
+    sending,
+    forwarding,
+    receiving,
+};
+
 struct RadioOperation {
     EasyLink_TxPacket easyLinkTxPacket;
     uint8_t retriesDone;
     uint8_t maxNumberOfRetries;
     uint32_t ackTimeoutMs;
-
+    enum opType operation;
     enum NodeRadioOperationStatus result;
 };
 
@@ -86,10 +91,10 @@ static struct ComboPacket latestRxPacket;
 static struct ComboPacket latestTxPacket;
 static uint16_t latestAckRxSeqNo;
 
-static uint32_t prevTicks;
+static uint32_t prevTicks = 0;
 
-static int8_t last_rssi;
-static uint32_t rssi_timestamp;
+static int8_t last_rssi = RSSI_THRESHOLD;
+static uint32_t rssi_timestamp = 0;
 
 static bool sleeping;
 static EasyLink_Status easystat;
@@ -110,6 +115,13 @@ static void rxDoneCallback(EasyLink_RxPacket * rxPacket, EasyLink_Status status)
 
 /* Init Function */
 void macTask_init(void) {
+
+    /* Initialize Local Variables */
+    currentRadioOperation.maxNumberOfRetries = 0;
+    currentRadioOperation.ackTimeoutMs = NO_TIMEOUT;
+    currentRadioOperation.retriesDone = 0;
+    currentRadioOperation.operation = receiving;
+    currentRadioOperation.result = NodeRadioStatus_Failed;
 
     /* Create semaphore used for exclusive radio access */
     Semaphore_Params semParam;
@@ -166,14 +178,14 @@ static void macTaskFunction(UArg arg0, UArg arg1)
         }
         /* Packet already passed up to flooding so just go into rx mode */
         if (events & RADIO_EVENT_OTHER_PACKET_RECEIVED) {
-          asyncrx(currentRadioOperation.ackTimeoutMs); //THIS should go currentRadioOp timeout
+          asyncrx(currentRadioOperation.ackTimeoutMs);
         }
 
         /* If we get an ACK intended for us */
         if (events & RADIO_EVENT_DATA_ACK_RECEIVED)
         {
             //if we were expecting ack with this seqNo
-            if ((Semaphore_getCount(radioResultSemHandle) == 0) && (latestAckRxSeqNo == latestTxPacket.packet.dataPacket.seqNo)) {
+            if ((currentRadioOperation.operation == sending) && (latestAckRxSeqNo == latestTxPacket.packet.dataPacket.seqNo)) {
                 returnRadioOperationStatus(NodeRadioStatus_Success);
 
             }
@@ -192,7 +204,7 @@ static void macTaskFunction(UArg arg0, UArg arg1)
         if (events & RADIO_EVENT_ACK_TIMEOUT) {
             //if not in Radio Operation
 //            if (Semaphore_getCount(radioResultSemHandle) != 0) {
-            if (currentRadioOperation.ackTimeoutMs == 0) {
+            if (currentRadioOperation.operation != sending) {
                 asyncrx(currentRadioOperation.ackTimeoutMs);
             }
             // If we haven't resent it the maximum number of times yet, then resend packet
@@ -270,9 +282,9 @@ enum NodeRadioOperationStatus macTask_sendData(struct ComboPacket* packet)
 //    System_flush();
     enum NodeRadioOperationStatus status;
 
-    /* Get radio access sempahore */
+    /* Get radio access semaphore */
     Semaphore_pend(radioAccessSemHandle, BIOS_WAIT_FOREVER);
-
+    currentRadioOperation.operation = sending;
     /* Save data to send */
     memcpy(&latestTxPacket, packet, sizeof(struct ComboPacket));
 
@@ -298,6 +310,7 @@ void macTask_forwardPacket(struct ComboPacket* packet)
 
     /* Get radio access sempahore */
     Semaphore_pend(radioAccessSemHandle, BIOS_WAIT_FOREVER);
+    currentRadioOperation.operation = forwarding;
 
     /* Save data to send */
     memcpy(&latestTxPacket, packet, sizeof(struct ComboPacket));
@@ -323,6 +336,7 @@ static void returnRadioOperationStatus(enum NodeRadioOperationStatus result)
     /* Save result */
     currentRadioOperation.result = result;
     currentRadioOperation.ackTimeoutMs = NO_TIMEOUT;
+    currentRadioOperation.operation = receiving;
     /* Post result semaphore */
     Semaphore_post(radioResultSemHandle);
 }
@@ -464,25 +478,18 @@ static void resendPacket()
     currentRadioOperation.retriesDone++;
 
     asyncrx(currentRadioOperation.ackTimeoutMs);
-
-//    /* Increase retries by one */
-//    currentRadioOperation.retriesDone++;
 }
 
 static void asyncrx(uint32_t timeout) {
-//        System_printf("asyncRx\n");
-//        System_flush();
+
     /* Abort any previously running asyncrx*/
     if (EasyLink_abort() != EasyLink_Status_Success) {
         System_abort("EasyLink_abort failed");
     }
 
-    if (timeout == NO_TIMEOUT) {
-        currentRadioOperation.maxNumberOfRetries = 0; //might be more elegant way of indicating indefinite rx
-    }
-
     EasyLink_setCtrl(EasyLink_Ctrl_AsyncRx_TimeOut, EasyLink_ms_To_RadioTime(timeout));
-    easystat = EasyLink_receiveAsync(rxDoneCallback, timeout);
+    easystat = EasyLink_receiveAsync(rxDoneCallback, 0);
+
     if (easystat != EasyLink_Status_Success)
     {
         System_abort("EasyLink_receiveAsync failed");

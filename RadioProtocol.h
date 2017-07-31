@@ -37,7 +37,7 @@
 #include "easylink/EasyLink.h"
 
 
-#define NODE_ADDR 2
+#define NODE_ADDR 0
 
 enum PacketType {
     PacketType_Ack,
