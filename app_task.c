@@ -34,9 +34,10 @@
 #define APP_EVENT_ALL                  0xFFFFFFFF
 #define APP_EVENT_SEND_DATA    (uint32_t)(1 << 0)
 #define APP_EVENT_NEW_DATA     (uint32_t)(1 << 1)
-#define APP_EVENT_RESEND       (uint32_t)(1 << 2)
+#define APP_EVENT_UPDATE_LCD   (uint32_t)(1 << 2)
 
 
+#define PACKET_INTERVAL_MS 15
 /***** Variable declarations *****/
 static Task_Params appTaskParams;
 Task_Struct appTask;    /* not static so you can see in ROV */
@@ -49,10 +50,7 @@ static Display_Handle hDisplayLcd;
 static struct ComboPacket latestPacket;
 static struct ComboPacket tempNewPacket;
 static int8_t latestRssi;
-static uint16_t latestAckSeqNo;
 
-static uint16_t rxPacketCount = 0;
-static uint16_t counter = 000;
 /* Pin driver handle */
 static PIN_Handle buttonPinHandle;
 static PIN_State buttonPinState;
@@ -63,7 +61,16 @@ static PIN_State ledPinState;
 
 static bool txFlag;
 
-//array of seq num received?
+Clock_Struct sensorTimerClock;     /* not static so you can see in ROV */
+static Clock_Handle sensorTimerClockHandle;
+
+//packet statistics
+static uint16_t latestAckSeqNo;
+static uint16_t counter = 0;
+static uint16_t rxPacketCount = 0;
+static uint16_t txPacketCount = 0;
+static uint16_t rxAckCount = 0;
+static uint16_t retransmissionCount = 0;
 
 /* Enable the 3.3V power domain used by the LCD */
 PIN_Config pinTable[] = {
@@ -94,6 +101,7 @@ PIN_Config ledPinTable[] = {
 static void appTaskFunction(UArg arg0, UArg arg1);
 void buttonCallback(PIN_Handle handle, PIN_Id pinId);
 void buttonCallback1(PIN_Handle handle, PIN_Id pinId);
+void sensorTimerCallback(UArg arg0);
 static void updateLcd(void);
 
 
@@ -106,15 +114,18 @@ void appTask_init(void)
         System_abort("Error initializing board 3.3V domain pins\n");
     }
 
-    txFlag = 1;
     latestAckSeqNo = 0;
-    tempNewPacket.destAddress = 0x01;
     /* Create event used internally for state changes */
     Event_Params eventParam;
     Event_Params_init(&eventParam);
     Event_construct(&appEvent, &eventParam);
     appEventHandle = Event_handle(&appEvent);
 
+    Clock_Params clkParams;
+    clkParams.period = 0;
+    clkParams.startFlag = FALSE;
+    Clock_construct(&sensorTimerClock, sensorTimerCallback, 1, &clkParams);
+    sensorTimerClockHandle = Clock_handle(&sensorTimerClock);
 
     /* Create the node task */
     Task_Params_init(&appTaskParams);
@@ -164,33 +175,30 @@ static void appTaskFunction(UArg arg0, UArg arg1)
     }
 
 
+    Clock_setPeriod(sensorTimerClockHandle, (PACKET_INTERVAL_MS * 1000 / Clock_tickPeriod));
+//    Clock_start(sensorTimerClockHandle);
+
+    tempNewPacket.destAddress = 0;
+    tempNewPacket.packet.header.sourceAddress = NODE_ADDR;
+    tempNewPacket.packet.header.packetType = PacketType_Data;
+
     while(1) {
-        uint32_t events = Event_pend(appEventHandle, 0, APP_EVENT_ALL, 1000);
+        uint32_t events = Event_pend(appEventHandle, 0, APP_EVENT_ALL, BIOS_WAIT_FOREVER);
 
         if(events & APP_EVENT_SEND_DATA) {
+
           counter += 1;
-          tempNewPacket.destAddress ^= 0b11; // addr 2: ^= 0b01 addr 1: ^= 0b10 addr 0: initialize to 1 ^=0b11
-          tempNewPacket.packet.header.sourceAddress = NODE_ADDR;
-          tempNewPacket.packet.header.packetType = PacketType_Data;
-          tempNewPacket.packet.dataPacket.seqNo = counter;
 
           if (counter >= 200) {
               txFlag = 0;
           }
+
+          txPacketCount++;
           floodTask_sendData(&tempNewPacket);
         }
-        if(events & APP_EVENT_RESEND) {
-            floodTask_sendData(&tempNewPacket);
+        if(events & APP_EVENT_UPDATE_LCD) {
+            updateLcd();
         }
-
-//        if (counter >= 100) {
-//            txFlag = 0;
-//            counter = 0;
-//            rxPacketCount = 0;
-//            latestAckSeqNo = 0;
-//            Event_post(appEventHandle, APP_EVENT_SEND_DATA);
-//        }
-        updateLcd();
     }
 }
 
@@ -199,28 +207,19 @@ void appTask_packetReceived(struct ComboPacket* packet, int8_t rssi)
         /* Save the values */
         memcpy(&latestPacket, packet, sizeof(struct ComboPacket));
         latestRssi = rssi;
-
-        if(latestPacket.destAddress == NODE_ADDR) {
-            rxPacketCount++;
-            if (!txFlag) {
-                txFlag = 1;
-                Event_post(appEventHandle, APP_EVENT_SEND_DATA);
-            }
-        }
 }
 
 void appTask_ackReceived(uint16_t seqNo)
 {
     latestAckSeqNo = seqNo;
-    if (txFlag) {
-        Event_post(appEventHandle, APP_EVENT_SEND_DATA);
-    }
+    rxAckCount++;
 }
 
-void appTask_sendFail() {
-    if (txFlag) {
-        Event_post(appEventHandle, APP_EVENT_RESEND);
-    }
+void appTask_sendFail()
+{
+//    System_printf("Fail %d\n", Clock_getTicks());
+//    System_flush();
+//    Event_post(appEventHandle, APP_EVENT_RESEND);
 }
 
 /* Pin interrupt Callback function board buttons configured in the pinTable. */
@@ -232,7 +231,7 @@ void buttonCallback(PIN_Handle handle, PIN_Id pinId)
 
     if (PIN_getInputValue(Board_BUTTON0) == 0)
     {
-        Event_post(appEventHandle, APP_EVENT_SEND_DATA);
+        Event_post(appEventHandle, APP_EVENT_UPDATE_LCD);
     }
     if (PIN_getInputValue(Board_BUTTON1) == 0)
     {
@@ -243,17 +242,33 @@ void buttonCallback(PIN_Handle handle, PIN_Id pinId)
     }
 }
 
+void sensorTimerCallback(UArg arg0)
+{
+
+    if (latestAckSeqNo < counter) {
+        retransmissionCount++;
+        floodTask_sendData(&tempNewPacket);
+    }
+    else if (counter < 1000) {
+        counter += 1;
+        txPacketCount++;
+        tempNewPacket.packet.dataPacket.seqNo = counter;
+        floodTask_sendData(&tempNewPacket);
+    }
+
+}
+
 static void updateLcd(void) {
 
 //    Display_clear(hDisplayLcd);
     Display_print0(hDisplayLcd, 0, 0, "SAddr DAddr");
-
-    Display_print2(hDisplayLcd, 1, 0, "0x%02x  0x%02x",
-                latestPacket.packet.header.sourceAddress, latestPacket.destAddress);
+    Display_print2(hDisplayLcd, 1, 0, "0x%02x  0x%02x", latestPacket.packet.header.sourceAddress, latestPacket.destAddress);
     Display_print0(hDisplayLcd, 2, 0, "SeqNo RSSI");
-    Display_print2(hDisplayLcd, 3, 0, "%d   %04d",
-                    latestPacket.packet.dataPacket.seqNo, latestRssi);
-    Display_print1(hDisplayLcd, 4, 0, "Pkts Rx'd %d", rxPacketCount);
-    Display_print1(hDisplayLcd, 5, 0, "Ack Rx'd %d", latestAckSeqNo);
+    Display_print2(hDisplayLcd, 3, 0, "%d   %04d", latestPacket.packet.dataPacket.seqNo, latestRssi);
+    Display_print1(hDisplayLcd, 4, 0, "AckSeqNo %d", latestAckSeqNo);
+    Display_print1(hDisplayLcd, 5, 0, "Pkts Rx'd %d", rxPacketCount);
+    Display_print1(hDisplayLcd, 6, 0, "Pkts Tx'd %d", txPacketCount);
+    Display_print1(hDisplayLcd, 7, 0, "Retransmit %d", retransmissionCount);
+    Display_print1(hDisplayLcd, 8, 0, "Ack Rx'd %d", rxAckCount);
 }
 

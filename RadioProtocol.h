@@ -38,6 +38,7 @@
 
 
 #define NODE_ADDR 0
+#define FLOOD_HOP_COUNT 2
 
 enum PacketType {
     PacketType_Ack,

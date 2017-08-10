@@ -76,7 +76,7 @@ static void floodTaskFunction(UArg arg0, UArg arg1)
         if (events & FLOOD_EVENT_SEND_DATA) {
           //fill out empty fields in packet
           packetSend.packet.header.floodControl = (0x01 << NODE_ADDR);
-          packetSend.packet.header.hopCount = 1;
+          packetSend.packet.header.hopCount = FLOOD_HOP_COUNT;
           //call mac task
           if (macTask_sendData(&packetSend) != NodeRadioStatus_Success) {
               appTask_sendFail();

@@ -48,9 +48,9 @@
 #define RADIO_EVENT_VALID_PACKET_RECEIVED        (uint32_t)(1 << 4)
 #define RADIO_EVENT_ACK_TIMEOUT                  (uint32_t)(1 << 5)
 
-#define RADIO_MAX_RETRIES 1
+#define RADIO_MAX_RETRIES 0
 #define RADIO_ACK_TIMEOUT_TIME_MS 10
-#define NO_TIMEOUT 500
+#define NO_TIMEOUT 0
 
 #define RSSI_THRESHOLD -55
 #define RSSI_TIMEOUT_MS 15
@@ -100,6 +100,7 @@ static bool sleeping;
 static EasyLink_Status easystat;
 /* Pin driver handle */
 extern PIN_Handle ledPinHandle;
+
 
 /***** Prototypes *****/
 static void macTaskFunction(UArg arg0, UArg arg1);
@@ -157,6 +158,9 @@ static void macTaskFunction(UArg arg0, UArg arg1)
         System_abort("EasyLink_init failed");
     }
 
+    uint32_t freq = EasyLink_getFrequency();
+    int8_t power = EasyLink_getRfPwr();
+    EasyLink_setRfPwr(-10);
     asyncrx(NO_TIMEOUT);
 
     /* Enter main task loop */
@@ -247,7 +251,7 @@ static void csma() {
   //RSSI check
   uint32_t currentTicks;
   uint32_t timeSinceRssi;
-  static uint8_t expBackoff = 1;
+  static uint8_t expBackoff = 0;
 
   currentTicks = Clock_getTicks(); //Ticks are 10microsecond intervals
 
@@ -255,18 +259,18 @@ static void csma() {
   if (currentTicks > rssi_timestamp)
   {
       //calculate time since last reading in 1ms units
-      timeSinceRssi = ((currentTicks - rssi_timestamp) * Clock_tickPeriod) / 10000;
+      timeSinceRssi = ((currentTicks - rssi_timestamp) * Clock_tickPeriod) / 1000;
   }
   else
   {
       //calculate time since last reading in 1ms units
-      timeSinceRssi = ((prevTicks - rssi_timestamp) * Clock_tickPeriod) / 10000;
+      timeSinceRssi = ((prevTicks - rssi_timestamp) * Clock_tickPeriod) / 1000;
   }
 
   if (last_rssi > RSSI_THRESHOLD && timeSinceRssi < RSSI_TIMEOUT_MS) {
       sleeping = 1;
-      Task_sleep(100*get_RNG(expBackoff)); //Sleep for arbitrary amount
-      (expBackoff >= 10) ? expBackoff = 1 : expBackoff++;
+      Task_sleep(get_RNG(expBackoff)*1000/Clock_tickPeriod); //Sleep for arbitrary amount
+      (expBackoff >= 3) ? expBackoff = 0 : expBackoff++;
       sleeping = 0;
   }
   else {
@@ -278,7 +282,7 @@ static void csma() {
 //Hook to other tasks to send regular data packet
 enum NodeRadioOperationStatus macTask_sendData(struct ComboPacket* packet)
 {
-//    System_printf("macTaskSendData\n");
+//    System_printf("Send %d\n", Clock_getTicks());
 //    System_flush();
     enum NodeRadioOperationStatus status;
 
@@ -383,7 +387,7 @@ static void sendAckPacket(uint8_t destAddress, uint16_t seqNo) {
 
     struct AckPacket ackPacket;
     ackPacket.header.floodControl = 0;
-    ackPacket.header.hopCount = 2;
+    ackPacket.header.hopCount = FLOOD_HOP_COUNT;
     ackPacket.header.packetType = PacketType_Ack;
     ackPacket.header.sourceAddress = NODE_ADDR;
     ackPacket.seqNo = seqNo;
