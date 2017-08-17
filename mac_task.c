@@ -159,8 +159,9 @@ static void macTaskFunction(UArg arg0, UArg arg1)
     }
 
     uint32_t freq = EasyLink_getFrequency();
+
+    EasyLink_setRfPwr(5);
     int8_t power = EasyLink_getRfPwr();
-    EasyLink_setRfPwr(-10);
     asyncrx(NO_TIMEOUT);
 
     /* Enter main task loop */
@@ -248,6 +249,7 @@ uint32_t get_RNG(uint8_t numBits) {
 
 //Checks RSSI and Timestamp to see whether we should wait arbitrary time before tx or not
 static void csma() {
+//  return;
   //RSSI check
   uint32_t currentTicks;
   uint32_t timeSinceRssi;
@@ -351,6 +353,8 @@ static void sendDataPacket(struct DataPacket dPacket, uint8_t destAddress)
 //    System_printf("sendDataPacket\n");
 //    System_flush();
 
+    txPacketCount++;
+    statArray[destAddress].tx++;
 
     /* Set destination address in EasyLink API */
     currentRadioOperation.easyLinkTxPacket.dstAddr[0] = destAddress;

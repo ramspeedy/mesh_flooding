@@ -37,8 +37,9 @@
 #include "easylink/EasyLink.h"
 
 
-#define NODE_ADDR 0
+#define NODE_ADDR 4
 #define FLOOD_HOP_COUNT 2
+#define NUM_NODES 5
 
 enum PacketType {
     PacketType_Ack,
