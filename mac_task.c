@@ -49,11 +49,11 @@
 #define RADIO_EVENT_ACK_TIMEOUT                  (uint32_t)(1 << 5)
 
 #define RADIO_MAX_RETRIES 0
-#define RADIO_ACK_TIMEOUT_TIME_MS 10
+#define RADIO_ACK_TIMEOUT_TIME_MS 6
 #define NO_TIMEOUT 0
 
-#define RSSI_THRESHOLD -55
-#define RSSI_TIMEOUT_MS 15
+#define RSSI_THRESHOLD -70
+#define RSSI_TIMEOUT_MS 6
 
 
 /***** Type declarations *****/
@@ -158,9 +158,10 @@ static void macTaskFunction(UArg arg0, UArg arg1)
         System_abort("EasyLink_init failed");
     }
 
+
     uint32_t freq = EasyLink_getFrequency();
 
-    EasyLink_setRfPwr(5);
+    EasyLink_setRfPwr(-21);
     int8_t power = EasyLink_getRfPwr();
     asyncrx(NO_TIMEOUT);
 
@@ -208,7 +209,6 @@ static void macTaskFunction(UArg arg0, UArg arg1)
 
         if (events & RADIO_EVENT_ACK_TIMEOUT) {
             //if not in Radio Operation
-//            if (Semaphore_getCount(radioResultSemHandle) != 0) {
             if (currentRadioOperation.operation != sending) {
                 asyncrx(currentRadioOperation.ackTimeoutMs);
             }
@@ -249,7 +249,7 @@ uint32_t get_RNG(uint8_t numBits) {
 
 //Checks RSSI and Timestamp to see whether we should wait arbitrary time before tx or not
 static void csma() {
-//  return;
+    return;
   //RSSI check
   uint32_t currentTicks;
   uint32_t timeSinceRssi;
@@ -270,10 +270,8 @@ static void csma() {
   }
 
   if (last_rssi > RSSI_THRESHOLD && timeSinceRssi < RSSI_TIMEOUT_MS) {
-      sleeping = 1;
       Task_sleep(get_RNG(expBackoff)*1000/Clock_tickPeriod); //Sleep for arbitrary amount
       (expBackoff >= 3) ? expBackoff = 0 : expBackoff++;
-      sleeping = 0;
   }
   else {
       expBackoff = 1;
@@ -284,8 +282,7 @@ static void csma() {
 //Hook to other tasks to send regular data packet
 enum NodeRadioOperationStatus macTask_sendData(struct ComboPacket* packet)
 {
-//    System_printf("Send %d\n", Clock_getTicks());
-//    System_flush();
+
     enum NodeRadioOperationStatus status;
 
     /* Get radio access semaphore */
@@ -350,8 +347,6 @@ static void returnRadioOperationStatus(enum NodeRadioOperationStatus result)
 //Internal send command for Data Packets
 static void sendDataPacket(struct DataPacket dPacket, uint8_t destAddress)
 {
-//    System_printf("sendDataPacket\n");
-//    System_flush();
 
     txPacketCount++;
     statArray[destAddress].tx++;
@@ -360,9 +355,9 @@ static void sendDataPacket(struct DataPacket dPacket, uint8_t destAddress)
     currentRadioOperation.easyLinkTxPacket.dstAddr[0] = destAddress;
 
     /* Copy data packet to payload
-     * Note that the EasyLink API will implcitily both add the length byte and the destination address byte. */
+     * Note that the EasyLink API will implicitly both add the length byte and the destination address byte. */
     memcpy(currentRadioOperation.easyLinkTxPacket.payload, ((uint8_t*)&dPacket), sizeof(struct DataPacket));
-    currentRadioOperation.easyLinkTxPacket.len = sizeof(struct DataPacket);
+    currentRadioOperation.easyLinkTxPacket.len = dPacket.length;
 
     /* Setup retries */
     currentRadioOperation.maxNumberOfRetries = RADIO_MAX_RETRIES;
@@ -386,8 +381,6 @@ static void sendDataPacket(struct DataPacket dPacket, uint8_t destAddress)
 }
 
 static void sendAckPacket(uint8_t destAddress, uint16_t seqNo) {
-//    System_printf("sendAckPacket\n");
-//    System_flush();
 
     struct AckPacket ackPacket;
     ackPacket.header.floodControl = 0;
@@ -423,9 +416,6 @@ static void sendAckPacket(uint8_t destAddress, uint16_t seqNo) {
 
 //Internal send command for Ack Packets
 static void forwardPacket(union GenericPacket gPacket, uint8_t destAddress) {
-//    System_printf("forwardPkt\n");
-//            System_flush();
-
 
     /* Set destination address in EasyLink API */
     currentRadioOperation.easyLinkTxPacket.dstAddr[0] = destAddress;
@@ -440,7 +430,7 @@ static void forwardPacket(union GenericPacket gPacket, uint8_t destAddress) {
     }
     else {
         memcpy(currentRadioOperation.easyLinkTxPacket.payload, (&gPacket), sizeof(struct DataPacket));
-        currentRadioOperation.easyLinkTxPacket.len = sizeof(struct DataPacket);
+        currentRadioOperation.easyLinkTxPacket.len = gPacket.dataPacket.length;
     }
 
     /* Setup retries */
@@ -484,7 +474,7 @@ static void resendPacket()
 
     /* Increase retries by one */
     currentRadioOperation.retriesDone++;
-
+    statArray[currentRadioOperation.easyLinkTxPacket.dstAddr[0]].reTX++;
     asyncrx(currentRadioOperation.ackTimeoutMs);
 }
 
@@ -507,8 +497,6 @@ static void asyncrx(uint32_t timeout) {
 //Callback for async Rx func
 static void rxDoneCallback(EasyLink_RxPacket * rxPacket, EasyLink_Status status)
 {
-//        System_printf("rxDone\n");
-//        System_flush();
     struct PacketHeader* packetHeader;
 
     /* If this callback is called because of a packet received */

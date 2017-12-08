@@ -14,6 +14,8 @@ void appTask_sendFail();
 struct nodeStat {
     uint16_t tx;
     uint16_t rx;
+    uint16_t reTX; //retransmissions
+    uint16_t duplicate;
 };
 
 extern uint16_t txPacketCount;

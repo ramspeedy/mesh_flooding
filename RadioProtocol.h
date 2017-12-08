@@ -37,8 +37,9 @@
 #include "easylink/EasyLink.h"
 
 
-#define NODE_ADDR 4
-#define FLOOD_HOP_COUNT 2
+#define NODE_ADDR 1
+#define PACKET_LENGTH 100
+#define FLOOD_HOP_COUNT 1
 #define NUM_NODES 5
 
 enum PacketType {
@@ -56,7 +57,8 @@ struct PacketHeader {
 struct DataPacket {
     struct PacketHeader header;
     uint16_t seqNo;
-    uint32_t time100MiliSec;
+    uint8_t length;
+    char byteArr[100];
 };
 
 struct AckPacket {

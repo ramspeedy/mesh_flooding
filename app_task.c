@@ -39,7 +39,7 @@
 #define APP_EVENT_UPDATE_LCD_STAT (uint32_t)(1 << 3)
 
 
-#define PACKET_INTERVAL_MS 15
+#define PACKET_INTERVAL_MS 400
 /***** Variable declarations *****/
 static Task_Params appTaskParams;
 Task_Struct appTask;    /* not static so you can see in ROV */
@@ -158,7 +158,7 @@ static void appTaskFunction(UArg arg0, UArg arg1)
     /* Check if the selected Display type was found and successfully opened */
     if (hDisplayLcd)
     {
-        Display_print0(hDisplayLcd, 0, 0, "Waiting for pkt");
+        Display_print0(hDisplayLcd, 0, 0, "Startup");
     }
 
 
@@ -188,48 +188,69 @@ static void appTaskFunction(UArg arg0, UArg arg1)
 
 
     Clock_setPeriod(sensorTimerClockHandle, (PACKET_INTERVAL_MS * 1000 / Clock_tickPeriod));
-    Clock_start(sensorTimerClockHandle);
+//    Clock_start(sensorTimerClockHandle);
 
 
     tempNewPacket.destAddress = 0;
     tempNewPacket.packet.header.sourceAddress = NODE_ADDR;
     tempNewPacket.packet.header.packetType = PacketType_Data;
 
+    static uint8_t state_LCD = 0;
+
     while(1) {
         uint32_t events = Event_pend(appEventHandle, 0, APP_EVENT_ALL, BIOS_WAIT_FOREVER);
 
         if(events & APP_EVENT_SEND_DATA) {
             static uint8_t destAddr = 0;
-                if (txFlag = 1 && counter < 1000) {
+//                if (txFlag = 1) {
                     txFlag = 0;
                     counter++;
-                    destAddr++;
+//                    destAddr++;
+//
+//                    destAddr = (destAddr == NUM_NODES) ? 0 : destAddr;
+//                    destAddr = (destAddr == NODE_ADDR) ? ((destAddr == NUM_NODES-1) ? 0 : destAddr+1) : destAddr;
+//
+//                    if ((counter%4) == 0) {
+//                        destAddr = 2;
+//                    }
+//                    else {
+//                        destAddr = 0;
+//                    }
 
-                    destAddr = (destAddr == NUM_NODES) ? 0 : destAddr;
-                    destAddr = (destAddr == NODE_ADDR) ? ((destAddr == NUM_NODES-1) ? 0 : destAddr+1) : destAddr;
+                    destAddr = 2;
 
                     tempNewPacket.destAddress = destAddr;
                     tempNewPacket.packet.dataPacket.seqNo = counter;
+                    tempNewPacket.packet.dataPacket.length = PACKET_LENGTH;
                     floodTask_sendData(&tempNewPacket);
-                }
-
+//                }
         }
 
         if (events & APP_EVENT_UPDATE_LCD) {
-            updateLcd();
+            switch (state_LCD) {
+                case 0:
+                    updateLcd();
+                    state_LCD++;
+                    break;
+                case 1:
+                    updateLcd2();
+                    state_LCD = 0;
+                    break;
+            }
         }
 
-        if (events & APP_EVENT_UPDATE_LCD_STAT) {
-            updateLcd2();
-        }
-//        updateLcd2();
     }
 }
 
 void appTask_packetReceived(struct ComboPacket* packet, int8_t rssi)
 {
         /* Save the values */
+        static uint16_t lastRxSeqNo = -1;
         memcpy(&latestPacket, packet, sizeof(struct ComboPacket));
+        if (latestPacket.packet.dataPacket.seqNo <= lastRxSeqNo) {
+            statArray[latestPacket.packet.header.sourceAddress].duplicate++;
+        }
+        lastRxSeqNo = latestPacket.packet.dataPacket.seqNo;
         latestRssi = rssi;
         rxPacketCount++;
         statArray[latestPacket.packet.header.sourceAddress].rx++;
@@ -246,7 +267,6 @@ void appTask_ackReceived(uint16_t seqNo)
 
 void appTask_sendFail()
 {
-    retransmissionCount++;
     txFlag = 1;
 }
 
@@ -259,27 +279,35 @@ void buttonCallback(PIN_Handle handle, PIN_Id pinId)
 
     if (PIN_getInputValue(Board_BUTTON0) == 0)
     {
-        Event_post(appEventHandle, APP_EVENT_UPDATE_LCD);
+        static state_radio = 0;
+        if (state_radio) {
+            state_radio = 0;
+            Clock_stop(sensorTimerClockHandle);
+        }
+        else {
+            state_radio = 1;
+            Clock_start(sensorTimerClockHandle);
+        }
     }
     if (PIN_getInputValue(Board_BUTTON1) == 0)
     {
-        Event_post(appEventHandle, APP_EVENT_UPDATE_LCD_STAT);
+        Event_post(appEventHandle, APP_EVENT_UPDATE_LCD);
     }
 }
 
 void sensorTimerCallback(UArg arg0)
 {
-//    return;
-//    Event_post(appEventHandle, APP_EVENT_SEND_DATA);
+    Event_post(appEventHandle, APP_EVENT_SEND_DATA);
+    return;
     static uint8_t destAddr = 0;
-    if (txFlag = 1 && counter < 1000) {
+    if (txFlag) {
         txFlag = 0;
         counter++;
         destAddr++;
 
         destAddr = (destAddr == NUM_NODES) ? 0 : destAddr;
         destAddr = (destAddr == NODE_ADDR) ? ((destAddr == NUM_NODES-1) ? 0 : destAddr+1) : destAddr;
-        destAddr = 0;
+//        destAddr = 0;
 
         tempNewPacket.destAddress = destAddr;
         tempNewPacket.packet.dataPacket.seqNo = counter;
@@ -293,13 +321,11 @@ static void updateLcd(void) {
 //    Display_clear(hDisplayLcd);
     Display_print0(hDisplayLcd, 0, 0, "SAddr DAddr");
     Display_print2(hDisplayLcd, 1, 0, "0x%02x  0x%02x", latestPacket.packet.header.sourceAddress, latestPacket.destAddress);
-    Display_print0(hDisplayLcd, 2, 0, "SeqNo RSSI");
-    Display_print2(hDisplayLcd, 3, 0, "%d   %04d", latestPacket.packet.dataPacket.seqNo, latestRssi);
-    Display_print1(hDisplayLcd, 4, 0, "AckSeqNo %d", latestAckSeqNo);
-    Display_print1(hDisplayLcd, 5, 0, "Pkts Rx'd %d", rxPacketCount);
-    Display_print1(hDisplayLcd, 6, 0, "Pkts Tx'd %d", txPacketCount);
-    Display_print1(hDisplayLcd, 7, 0, "Retransmit %d", retransmissionCount);
-    Display_print1(hDisplayLcd, 8, 0, "Ack Rx'd %d", rxAckCount);
+    Display_print0(hDisplayLcd, 2, 0, "SeqNo AckSeqNo");
+    Display_print2(hDisplayLcd, 3, 0, "%d   %d", latestPacket.packet.dataPacket.seqNo, latestAckSeqNo);
+    Display_print1(hDisplayLcd, 4, 0, "Pkts Rx'd %d", rxPacketCount);
+    Display_print1(hDisplayLcd, 5, 0, "Pkts Tx'd %d", txPacketCount);
+    Display_print1(hDisplayLcd, 6, 0, "Ack Rx'd %d", rxAckCount);
 }
 
 static void updateLcd2(void) {
@@ -310,5 +336,9 @@ static void updateLcd2(void) {
     for (i = 0; i < NUM_NODES; i++) {
         Display_print3(hDisplayLcd, i+1, 0, "%d %d %d", i, statArray[i].tx, statArray[i].rx);
     }
+    for (i = 0; i < NUM_NODES; i++) {
+        Display_print3(hDisplayLcd, i+1+NUM_NODES, 0, "%d %d %d", i, statArray[i].reTX, statArray[i].duplicate);
+    }
 
 }
+
