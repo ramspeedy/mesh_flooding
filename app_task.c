@@ -217,7 +217,7 @@ static void appTaskFunction(UArg arg0, UArg arg1)
 //                        destAddr = 0;
 //                    }
 
-                    destAddr = 2;
+                    destAddr = 1;
 
                     tempNewPacket.destAddress = destAddr;
                     tempNewPacket.packet.dataPacket.seqNo = counter;

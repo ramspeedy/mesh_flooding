@@ -10,27 +10,17 @@
 
 
 //*********************************************************************************
-// Parameter summary
-// Address: aa-bb
-// Frequency: 2445.00000 MHz
-// Data Format: Serial mode disable
-// Deviation: 50.000 kHz
-// Packet Length Config: Variable
-// Max Packet Length: 128
-// Packet Length: 30
-// RX Filter BW: 220 kHz
-// Symbol Rate: 50.00000 kBaud
-// Sync Word Length: 32 Bits
-// TX Power: 5 dBm
-// Whitening: No whitening
+
 
 #include <driverlib/rf_mailbox.h>
 #include <driverlib/rf_common_cmd.h>
 #include <driverlib/rf_prop_cmd.h>
 #include <ti/drivers/rf/RF.h>
-#include <rf_patches/rf_patch_cpe_genfsk.h>
-#include <rf_patches/rf_patch_rfe_genfsk.h>
-#include <rf_patches/rf_patch_mce_genfsk.h>
+//#include <rf_patches/rf_patch_cpe_genfsk.h>
+//#include <rf_patches/rf_patch_rfe_genfsk.h>
+//#include <rf_patches/rf_patch_mce_genfsk.h>
+#include <rf_patches/rf_patch_rfe_ble.h>
+#include <rf_patches/rf_patch_cpe_ble.h>
 #include "smartrf_settings.h"
 
 
@@ -38,9 +28,9 @@
 RF_Mode RF_prop =
 {
     .rfMode = RF_MODE_PROPRIETARY_2_4,
-    .cpePatchFxn = &rf_patch_cpe_genfsk,
-    .mcePatchFxn = &rf_patch_mce_genfsk,
-    .rfePatchFxn = &rf_patch_rfe_genfsk,
+    .cpePatchFxn = &rf_patch_cpe_ble,
+    .mcePatchFxn = 0,
+    .rfePatchFxn = &rf_patch_rfe_ble,
 };
 
 
@@ -49,32 +39,45 @@ uint32_t shape[] = {0x00000000, 0x00000000, 0x00000000, 0x360c0100, 0xacaba076, 
 
 // Overrides for CMD_PROP_RADIO_SETUP
 uint32_t pOverrides[] = {
-        MCE_RFE_OVERRIDE(1,0,0,1,0,0),
-        HW_REG_OVERRIDE(0x4038,0x34),
-        HW_REG_OVERRIDE(0x6088,0x3F1F),
-        HW_REG_OVERRIDE(0x608C,0x8213),
-        HW32_ARRAY_OVERRIDE(0x405C,1),
-        (uint32_t) 0x1801F800,
-        HW32_ARRAY_OVERRIDE(0x402C,1),
-        (uint32_t) 0x00608402,
-        (uint32_t) 0xc0040031,
-        (uint32_t) &shape[0],
-        (uint32_t) 0x00000343,
-        (uint32_t) 0x001000a3,
-        (uint32_t) 0x000484a3,
-        (uint32_t) 0x1c8f0583,
-        (uint32_t) 0x1c8f0543,
-        (uint32_t) 0x65980603,
-        (uint32_t) 0x00020623,
-        (uint32_t) 0x659805c3,
-        (uint32_t) 0x000205e3,
-        (uint32_t) 0x02010403,
-        HW32_ARRAY_OVERRIDE(0x4034,1),
-        (uint32_t) 0x177F0408,
-        (uint32_t) 0x00008463,
-        (uint32_t) 0x00388473,
-        (uint32_t) 0x00F388a3,
-        (uint32_t)0xFFFFFFFF,
+//        MCE_RFE_OVERRIDE(1,0,0,1,0,0),
+//        HW_REG_OVERRIDE(0x4038,0x34),
+//        HW_REG_OVERRIDE(0x6088,0x3F1F),
+//        HW_REG_OVERRIDE(0x608C,0x8213),
+//        HW32_ARRAY_OVERRIDE(0x405C,1),
+//        (uint32_t) 0x1801F800,
+//        HW32_ARRAY_OVERRIDE(0x402C,1),
+//        (uint32_t) 0x00608402,
+//        (uint32_t) 0xc0040031,
+//        (uint32_t) &shape[0],
+//        (uint32_t) 0x00000343,
+//        (uint32_t) 0x001000a3,
+//        (uint32_t) 0x000484a3,
+//        (uint32_t) 0x1c8f0583,
+//        (uint32_t) 0x1c8f0543,
+//        (uint32_t) 0x65980603,
+//        (uint32_t) 0x00020623,
+//        (uint32_t) 0x659805c3,
+//        (uint32_t) 0x000205e3,
+//        (uint32_t) 0x02010403,
+//        HW32_ARRAY_OVERRIDE(0x4034,1),
+//        (uint32_t) 0x177F0408,
+//        (uint32_t) 0x00008463,
+//        (uint32_t) 0x00388473,
+//        (uint32_t) 0x00F388a3,
+//        (uint32_t)0xFFFFFFFF,
+        0x00001007, // Run patched RFE code from RAM
+        0x00354038, // Synth: Set RTRIM (POTAILRESTRIM) to 5
+        0x4001402D, // Synth: Correct CKVD latency setting (address)
+        0x00608402, // Synth: Correct CKVD latency setting (value)
+        0x4001405D, // Synth: Set ANADIV DIV_BIAS_MODE to PG1 (address)
+        0x1801F800, // Synth: Set ANADIV DIV_BIAS_MODE to PG1 (value)
+        0x000784A3, // Synth: Set FREF = 3.43 MHz (24 MHz / 7)
+        0xA47E0583, // Synth: Set loop bandwidth after lock to 80 kHz (K2)
+        0xEAE00603, // Synth: Set loop bandwidth after lock to 80 kHz (K3, LSB)
+        0x00010623, // Synth: Set loop bandwidth after lock to 80 kHz (K3, MSB)
+        0x00456088, // Adjust AGC reference level
+        0x013800C3, // Use enhanced BLE shape,
+        0xFFFFFFFF, // End of override list
 };
 
 // CMD_PROP_RADIO_SETUP
@@ -109,6 +112,24 @@ rfc_CMD_PROP_RADIO_SETUP_t RF_cmdPropRadioDivSetup =
     .txPower = 0x9324,
     .pRegOverride = pOverrides,
 };
+
+rfc_CMD_RADIO_SETUP_t RF_cmdRadioSetup =
+{
+    .commandNo = CMD_RADIO_SETUP,
+    .status = 0x0000,
+    .pNextOp = 0, // INSERT APPLICABLE POINTER: (uint8_t*)&xxx
+    .startTime = 0x00000000,
+    .startTrigger.triggerType = 0x0,
+    .startTrigger.bEnaCmd = 0x0,
+    .startTrigger.triggerNo = 0x0,
+    .startTrigger.pastTrig = 0x0,
+    .condition.rule = 0x1, // Never
+    .condition.nSkip = 0x0,
+    .mode = 0,
+    .txPower = 0x9330,
+    .pRegOverride = pOverrides,
+};
+
 
 // CMD_FS
 rfc_CMD_FS_t RF_cmdFs =

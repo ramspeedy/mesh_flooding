@@ -154,7 +154,7 @@ void macTask_init(void) {
 static void macTaskFunction(UArg arg0, UArg arg1)
 {
     /* Initialize EasyLink: should refer to smartrf settings */
-    if(EasyLink_init(EasyLink_Phy_2_4_200kbps2gfsk) != EasyLink_Status_Success) {
+    if(EasyLink_init(EasyLink_Phy_Custom) != EasyLink_Status_Success) {
         System_abort("EasyLink_init failed");
     }
 

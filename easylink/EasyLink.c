@@ -56,6 +56,7 @@
 union setupCmd_t{
     rfc_CMD_PROP_RADIO_DIV_SETUP_t divSetup;
     rfc_CMD_PROP_RADIO_SETUP_t setup;
+    rfc_CMD_RADIO_SETUP_t regSetup;
 };
 
 #define EASYLINK_MAX_ADDR_SIZE           8
@@ -345,12 +346,12 @@ EasyLink_Status EasyLink_init(EasyLink_PhyType ui32ModType)
     {
         if(ChipInfo_GetChipType() == CHIP_TYPE_CC2650)
         {
-            memcpy(&EasyLink_cmdPropRadioSetup.setup, &RF_cmdPropRadioDivSetup, sizeof(rfc_CMD_PROP_RADIO_SETUP_t));
+            memcpy(&EasyLink_cmdPropRadioSetup.regSetup, &RF_cmdRadioSetup, sizeof(rfc_CMD_RADIO_SETUP_t));
         }
-        else
-        {
-            memcpy(&EasyLink_cmdPropRadioSetup.divSetup, &RF_cmdPropRadioDivSetup, sizeof(rfc_CMD_PROP_RADIO_DIV_SETUP_t));
-        }
+//        else
+//        {
+//            memcpy(&EasyLink_cmdPropRadioSetup.divSetup, &RF_cmdPropRadioDivSetup, sizeof(rfc_CMD_PROP_RADIO_DIV_SETUP_t));
+//        }
         memcpy(&EasyLink_cmdFs, &RF_cmdFs, sizeof(rfc_CMD_FS_t));
         memcpy(&EasyLink_RF_prop, &RF_prop, sizeof(RF_Mode));
         memcpy(&EasyLink_cmdPropRxAdv, RF_pCmdPropRxAdv_preDef, sizeof(rfc_CMD_PROP_RX_ADV_t));
@@ -402,7 +403,7 @@ EasyLink_Status EasyLink_init(EasyLink_PhyType ui32ModType)
 
     /* Request access to the radio */
     rfHandle = RF_open(&rfObject, &EasyLink_RF_prop,
-            (RF_RadioSetup*)&EasyLink_cmdPropRadioSetup.setup, &rfParams);
+            (RF_RadioSetup*)&EasyLink_cmdPropRadioSetup.regSetup, &rfParams);
 
     //Set Rx packet size, taking into account addr which is not in the hdr
     //(only length can be)
