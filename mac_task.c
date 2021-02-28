@@ -30,6 +30,7 @@
 #include "Board.h"
 
 #include <stdlib.h>
+#include <limits.h>
 #include "easylink/EasyLink.h"
 
 #include "mac_task.h"
@@ -49,11 +50,11 @@
 #define RADIO_EVENT_ACK_TIMEOUT                  (uint32_t)(1 << 5)
 
 #define RADIO_MAX_RETRIES 0
-#define RADIO_ACK_TIMEOUT_TIME_MS 6
+#define RADIO_ACK_TIMEOUT_TIME_MS 1
 #define NO_TIMEOUT 0
 
 #define RSSI_THRESHOLD -70
-#define RSSI_TIMEOUT_MS 6
+#define RSSI_TIMEOUT_MS 1
 
 
 /***** Type declarations *****/
@@ -91,12 +92,9 @@ static struct ComboPacket latestRxPacket;
 static struct ComboPacket latestTxPacket;
 static uint16_t latestAckRxSeqNo;
 
-static uint32_t prevTicks = 0;
-
 static int8_t last_rssi = RSSI_THRESHOLD;
 static uint32_t rssi_timestamp = 0;
 
-static bool sleeping;
 static EasyLink_Status easystat;
 /* Pin driver handle */
 extern PIN_Handle ledPinHandle;
@@ -161,7 +159,7 @@ static void macTaskFunction(UArg arg0, UArg arg1)
 
     uint32_t freq = EasyLink_getFrequency();
 
-    EasyLink_setRfPwr(-21);
+    EasyLink_setRfPwr(-9);
     int8_t power = EasyLink_getRfPwr();
     asyncrx(NO_TIMEOUT);
 
@@ -253,11 +251,11 @@ static void csma() {
   //RSSI check
   uint32_t currentTicks;
   uint32_t timeSinceRssi;
-  static uint8_t expBackoff = 0;
+  static uint8_t expBackoff = 1;
 
-  currentTicks = Clock_getTicks(); //Ticks are 10microsecond intervals
+  currentTicks = Clock_getTicks(); //Ticks are 10 microsecond intervals
 
-  //check for wrap around
+  //check for wrap around (only happens every ~700mins)
   if (currentTicks > rssi_timestamp)
   {
       //calculate time since last reading in 1ms units
@@ -266,16 +264,21 @@ static void csma() {
   else
   {
       //calculate time since last reading in 1ms units
-      timeSinceRssi = ((prevTicks - rssi_timestamp) * Clock_tickPeriod) / 1000;
+      timeSinceRssi = (((UINT_MAX - rssi_timestamp) + currentTicks) * Clock_tickPeriod) / 1000;
   }
 
-  if (last_rssi > RSSI_THRESHOLD && timeSinceRssi < RSSI_TIMEOUT_MS) {
-      Task_sleep(get_RNG(expBackoff)*1000/Clock_tickPeriod); //Sleep for arbitrary amount
-      (expBackoff >= 3) ? expBackoff = 0 : expBackoff++;
+  // the channel is busy if we have seen a packet recently or if last tx failed (ack not received)
+  if ((last_rssi > RSSI_THRESHOLD && timeSinceRssi < RSSI_TIMEOUT_MS) || (currentRadioOperation.retriesDone > 0)) {
+      //wait for random backoff and check medium, send when free
+      bool channelBusy = 1;
+      while (channelBusy) {
+          Task_sleep(get_RNG(expBackoff)*30/Clock_tickPeriod); //Sleep for multiples of 30bit periods
+          (expBackoff >= 3) ? expBackoff = 3 : expBackoff++;
+      }
   }
-  else {
-      expBackoff = 1;
-  }
+
+  //reset backoff after transmitting
+  expBackoff = 1;
 }
 
 
@@ -402,7 +405,6 @@ static void sendAckPacket(uint8_t destAddress, uint16_t seqNo) {
         System_abort("EasyLink_abort failed");
     }
 
-    /* Setup retries */
 
     /* Send packet  */
     if (EasyLink_transmit(&easyLinkAckTxPacket) != EasyLink_Status_Success)
@@ -465,6 +467,10 @@ static void resendPacket()
         System_abort("EasyLink_abort failed");
     }
 
+    /* Increase retries by one */
+    currentRadioOperation.retriesDone++; //needs to happen before csma call
+    statArray[currentRadioOperation.easyLinkTxPacket.dstAddr[0]].reTX++;
+
     csma();
     /* Send packet  */
     if (EasyLink_transmit(&currentRadioOperation.easyLinkTxPacket) != EasyLink_Status_Success)
@@ -472,9 +478,7 @@ static void resendPacket()
         System_abort("EasyLink_transmit failed");
     }
 
-    /* Increase retries by one */
-    currentRadioOperation.retriesDone++;
-    statArray[currentRadioOperation.easyLinkTxPacket.dstAddr[0]].reTX++;
+
     asyncrx(currentRadioOperation.ackTimeoutMs);
 }
 
@@ -517,8 +521,6 @@ static void rxDoneCallback(EasyLink_RxPacket * rxPacket, EasyLink_Status status)
 
           else if (packetHeader->packetType == PacketType_Data)
           {
-//              rssi_timestamp = Clock_getTicks();
-
               // Save Data Packet
               latestRxPacket.destAddress = rxPacket->dstAddr[0];
               memcpy((void*)&(latestRxPacket.packet), &rxPacket->payload, sizeof(struct DataPacket));
@@ -527,7 +529,6 @@ static void rxDoneCallback(EasyLink_RxPacket * rxPacket, EasyLink_Status status)
           }
         }
         else {
-
             last_rssi = rxPacket->rssi;
             rssi_timestamp = Clock_getTicks();
 

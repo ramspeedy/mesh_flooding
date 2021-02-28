@@ -75,7 +75,7 @@ static void floodTaskFunction(UArg arg0, UArg arg1)
 
         if (events & FLOOD_EVENT_SEND_DATA) {
           //fill out empty fields in packet
-          packetSend.packet.header.floodControl = (0x01 << NODE_ADDR);
+          packetSend.packet.header.floodControl = (0x1 << NODE_ADDR);
           packetSend.packet.header.hopCount = FLOOD_HOP_COUNT;
           //call mac task
           if (macTask_sendData(&packetSend) != NodeRadioStatus_Success) {
@@ -87,7 +87,7 @@ static void floodTaskFunction(UArg arg0, UArg arg1)
           //check flooding flags
           if (shouldForward(&packetFlood)) {
             //Modify flood bits in packet
-            packetFlood.packet.header.floodControl = (packetFlood.packet.header.floodControl | (1 << NODE_ADDR));
+            packetFlood.packet.header.floodControl = (packetFlood.packet.header.floodControl | (0x1 << NODE_ADDR));
             packetFlood.packet.header.hopCount--;
 
             //TODO make this into queue

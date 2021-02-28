@@ -37,7 +37,7 @@
 #include "easylink/EasyLink.h"
 
 
-#define NODE_ADDR 1
+#define NODE_ADDR 4
 #define PACKET_LENGTH 100
 #define FLOOD_HOP_COUNT 1
 #define NUM_NODES 5

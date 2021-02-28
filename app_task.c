@@ -38,9 +38,11 @@
 #define APP_EVENT_UPDATE_LCD   (uint32_t)(1 << 2)
 #define APP_EVENT_UPDATE_LCD_STAT (uint32_t)(1 << 3)
 
+#define PACKET_INTERVAL_MS 100
 
-#define PACKET_INTERVAL_MS 400
+
 /***** Variable declarations *****/
+
 static Task_Params appTaskParams;
 Task_Struct appTask;    /* not static so you can see in ROV */
 static uint8_t appTaskStack[APP_TASK_STACK_SIZE];
@@ -66,17 +68,20 @@ static bool txFlag;
 Clock_Struct sensorTimerClock;     /* not static so you can see in ROV */
 static Clock_Handle sensorTimerClockHandle;
 
-//packet statistics
+/******** PACKET STATS *********/
 static uint16_t latestAckSeqNo;
 static uint16_t counter = 0;
 static uint16_t rxPacketCount = 0;
  uint16_t txPacketCount = 0;
 static uint16_t rxAckCount = 0;
-static uint16_t retransmissionCount = 0;
-
-
+static uint16_t seqNoArray[NUM_NODES] = {0};
+static uint16_t routeArray[NUM_NODES][32] = {0};
 
 struct nodeStat statArray[NUM_NODES];
+
+//uint32_t latency_start = 0;
+//uint32_t latency_stop = 0;
+
 
 /* Enable the 3.3V power domain used by the LCD */
 PIN_Config pinTable[] = {
@@ -110,6 +115,8 @@ void buttonCallback1(PIN_Handle handle, PIN_Id pinId);
 void sensorTimerCallback(UArg arg0);
 static void updateLcd(void);
 static void updateLcd2(void);
+static void updateLcd3(void);
+static void top8(uint16_t* arr, uint8_t len, uint8_t* indexArray);
 
 
 /***** Function definitions *****/
@@ -205,11 +212,11 @@ static void appTaskFunction(UArg arg0, UArg arg1)
 //                if (txFlag = 1) {
                     txFlag = 0;
                     counter++;
-//                    destAddr++;
-//
-//                    destAddr = (destAddr == NUM_NODES) ? 0 : destAddr;
-//                    destAddr = (destAddr == NODE_ADDR) ? ((destAddr == NUM_NODES-1) ? 0 : destAddr+1) : destAddr;
-//
+                    destAddr++;
+
+                    destAddr = (destAddr == NUM_NODES) ? 0 : destAddr;
+                    destAddr = (destAddr == NODE_ADDR) ? ((destAddr == NUM_NODES-1) ? 0 : destAddr+1) : destAddr;
+
 //                    if ((counter%4) == 0) {
 //                        destAddr = 2;
 //                    }
@@ -217,7 +224,7 @@ static void appTaskFunction(UArg arg0, UArg arg1)
 //                        destAddr = 0;
 //                    }
 
-                    destAddr = 1;
+//                    destAddr = 1;
 
                     tempNewPacket.destAddress = destAddr;
                     tempNewPacket.packet.dataPacket.seqNo = counter;
@@ -234,7 +241,14 @@ static void appTaskFunction(UArg arg0, UArg arg1)
                     break;
                 case 1:
                     updateLcd2();
-                    state_LCD = 0;
+                    state_LCD++;
+                    break;
+                case 2:
+                case 3:
+                case 4:
+                case 5:
+                    updateLcd3();
+                    state_LCD == 5 ? state_LCD = 0 : state_LCD++;
                     break;
             }
         }
@@ -245,15 +259,23 @@ static void appTaskFunction(UArg arg0, UArg arg1)
 void appTask_packetReceived(struct ComboPacket* packet, int8_t rssi)
 {
         /* Save the values */
-        static uint16_t lastRxSeqNo = -1;
         memcpy(&latestPacket, packet, sizeof(struct ComboPacket));
-        if (latestPacket.packet.dataPacket.seqNo <= lastRxSeqNo) {
-            statArray[latestPacket.packet.header.sourceAddress].duplicate++;
-        }
-        lastRxSeqNo = latestPacket.packet.dataPacket.seqNo;
         latestRssi = rssi;
+
+        uint8_t sourceAddress = latestPacket.packet.header.sourceAddress;
+
+        //duplicates
+
+        if (latestPacket.packet.dataPacket.seqNo <= seqNoArray[sourceAddress]) {
+            statArray[sourceAddress].duplicate++;
+        }
+
+        //Route stats
+        routeArray[sourceAddress][latestPacket.packet.header.floodControl]++;
+
+        //PDR stats
+        statArray[sourceAddress].rx++;
         rxPacketCount++;
-        statArray[latestPacket.packet.header.sourceAddress].rx++;
 }
 
 void appTask_ackReceived(uint16_t seqNo)
@@ -279,7 +301,7 @@ void buttonCallback(PIN_Handle handle, PIN_Id pinId)
 
     if (PIN_getInputValue(Board_BUTTON0) == 0)
     {
-        static state_radio = 0;
+        static bool state_radio = 0;
         if (state_radio) {
             state_radio = 0;
             Clock_stop(sensorTimerClockHandle);
@@ -288,6 +310,7 @@ void buttonCallback(PIN_Handle handle, PIN_Id pinId)
             state_radio = 1;
             Clock_start(sensorTimerClockHandle);
         }
+//        Event_post(appEventHandle, APP_EVENT_SEND_DATA);
     }
     if (PIN_getInputValue(Board_BUTTON1) == 0)
     {
@@ -318,7 +341,7 @@ void sensorTimerCallback(UArg arg0)
 
 static void updateLcd(void) {
 
-//    Display_clear(hDisplayLcd);
+    Display_clear(hDisplayLcd);
     Display_print0(hDisplayLcd, 0, 0, "SAddr DAddr");
     Display_print2(hDisplayLcd, 1, 0, "0x%02x  0x%02x", latestPacket.packet.header.sourceAddress, latestPacket.destAddress);
     Display_print0(hDisplayLcd, 2, 0, "SeqNo AckSeqNo");
@@ -332,7 +355,7 @@ static void updateLcd2(void) {
 
 //    Display_clear(hDisplayLcd);
     Display_print0(hDisplayLcd, 0, 0, "A Tx Rx");
-    int i = 0;
+    uint8_t i = 0;
     for (i = 0; i < NUM_NODES; i++) {
         Display_print3(hDisplayLcd, i+1, 0, "%d %d %d", i, statArray[i].tx, statArray[i].rx);
     }
@@ -342,3 +365,77 @@ static void updateLcd2(void) {
 
 }
 
+static void updateLcd3(void) {
+        static uint8_t sourceAddr = 0;
+        sourceAddr = (sourceAddr == NUM_NODES) ? 0 : sourceAddr;
+        sourceAddr = (sourceAddr == NODE_ADDR) ? ((sourceAddr == NUM_NODES-1) ? 0 : sourceAddr+1) : sourceAddr;
+
+        Display_clear(hDisplayLcd);
+        Display_print1(hDisplayLcd, 0, 0, "SourceAddr %d", sourceAddr);
+        uint8_t i = 0;
+        uint8_t indexArr[8] = {0};
+        top8(routeArray[sourceAddr], 32, indexArr);
+        for (i = 0; i < 8; i++) {
+            Display_print2(hDisplayLcd, i+1, 0, "%d %d", indexArr[i], routeArray[sourceAddr][indexArr[i]]);
+        }
+        sourceAddr++;
+}
+
+static void top8(uint16_t* arr, uint8_t len, uint8_t* indexArray) {
+    uint8_t i;
+
+    for(i = 0; i < len; i++) {
+        if(arr[i] > arr[indexArray[0]]) {
+            indexArray[7] = indexArray[6];
+            indexArray[6] = indexArray[5];
+            indexArray[5] = indexArray[4];
+            indexArray[4] = indexArray[3];
+            indexArray[3] = indexArray[2];
+            indexArray[2] = indexArray[1];
+            indexArray[1] = indexArray[0];
+            indexArray[0] = i;
+        }
+        else if (arr[i] > arr[indexArray[1]]) {
+            indexArray[7] = indexArray[6];
+            indexArray[6] = indexArray[5];
+            indexArray[5] = indexArray[4];
+            indexArray[4] = indexArray[3];
+            indexArray[3] = indexArray[2];
+            indexArray[2] = indexArray[1];
+            indexArray[1] = i;
+        }
+        else if (arr[i] > arr[indexArray[2]]) {
+            indexArray[7] = indexArray[6];
+            indexArray[6] = indexArray[5];
+            indexArray[5] = indexArray[4];
+            indexArray[4] = indexArray[3];
+            indexArray[3] = indexArray[2];
+            indexArray[2] = i;
+        }
+        else if (arr[i] > arr[indexArray[3]]) {
+            indexArray[7] = indexArray[6];
+            indexArray[6] = indexArray[5];
+            indexArray[5] = indexArray[4];
+            indexArray[4] = indexArray[3];
+            indexArray[3] = i;
+        }
+        else if (arr[i] > arr[indexArray[4]]) {
+            indexArray[7] = indexArray[6];
+            indexArray[6] = indexArray[5];
+            indexArray[5] = indexArray[4];
+            indexArray[4] = i;
+        }
+        else if (arr[i] > arr[indexArray[5]]) {
+            indexArray[7] = indexArray[6];
+            indexArray[6] = indexArray[5];
+            indexArray[5] = i;
+        }
+        else if (arr[i] > arr[indexArray[6]]) {
+            indexArray[7] = indexArray[6];
+            indexArray[6] = i;
+        }
+        else if (arr[i] > arr[indexArray[7]]) {
+            indexArray[7] = i;
+        }
+    }
+}

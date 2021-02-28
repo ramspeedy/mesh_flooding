@@ -20,5 +20,7 @@ struct nodeStat {
 
 extern uint16_t txPacketCount;
 extern struct nodeStat statArray[NUM_NODES];
+//extern uint32_t latency_start;
+//extern uint32_t latency_stop;
 
 #endif /* TASKS_APPTASK_H_ */
